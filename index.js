@@ -1,12 +1,17 @@
-const express = require("express");
+import { exec } from "child_process";
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+app.get("/ffmpeg-version", (req, res) => {
+  exec("ffmpeg -version", (error, stdout, stderr) => {
+    if (error) {
+      return res.status(500).json({
+        ok: false,
+        error: stderr || error.message,
+      });
+    }
 
-app.get("/", (req, res) => {
-  res.send("ffmpeg render server alive");
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+    res.json({
+      ok: true,
+      output: stdout.split("\n")[0],
+    });
+  });
 });

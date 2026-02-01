@@ -1,10 +1,10 @@
-import express from "express";
+mport express from "express";
 import AWS from "aws-sdk";
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// ✅ R2(S3) 연결
+// R2(S3) 연결
 const s3 = new AWS.S3({
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -17,13 +17,13 @@ app.get("/", (req, res) => {
   res.json({ ok: true, message: "server alive" });
 });
 
-// ✅ "덮어쓰기 테스트" (항상 같은 Key로 putObject)
+// ✅ 덮어쓰기 업로드 테스트
 app.get("/r2-test", async (req, res) => {
   try {
     await s3
       .putObject({
         Bucket: process.env.R2_BUCKET,
-        Key: "render/output.mp4", // ✅ 이게 고정이라 무조건 덮어씀
+        Key: "render/output.mp4", // 🔥 고정 Key → 무조건 덮어쓰기
         Body: Buffer.from("THIS WILL BE OVERWRITTEN"),
         ContentType: "video/mp4",
       })

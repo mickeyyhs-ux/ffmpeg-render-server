@@ -4,6 +4,9 @@ const AWS = require("aws-sdk");
 const app = express();
 app.use(express.json());
 
+/* =========================
+   R2 (S3 compatible) Client
+   ========================= */
 const s3 = new AWS.S3({
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -12,48 +15,40 @@ const s3 = new AWS.S3({
   signatureVersion: "v4",
 });
 
+/* =========================
+   Health check
+   ========================= */
 app.get("/", (req, res) => {
   res.json({ ok: true, message: "server alive" });
 });
 
-app.get("/r2-test", async (req, res) => {
-  try {
-    await s3
-      .listObjectsV2({
-        Bucket: process.env.R2_BUCKET, // 🔥 이 줄이 핵심
-        MaxKeys: 1,
-      })
-      .promise();
-
-    res.json({ ok: true });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
-
-const PORT = process.env.PORT || 3000;
-// =========================
-// DEBUG ROUTES (ADD-ONLY)
-// =========================
-
-// 1) Railway env가 런타임에 실제로 들어오는지 확인
+/* =========================
+   ENV DEBUG (가장 중요)
+   ========================= */
 app.get("/env-check", (req, res) => {
-  const safe = (v) => (v ? `${String(v).slice(0, 4)}...${String(v).slice(-4)}` : null);
+  const preview = (v) =>
+    v ? `${String(v).slice(0, 4)}...${String(v).slice(-4)} (${String(v).length})` : null;
 
   res.json({
     ok: true,
     node: process.version,
+
     has_R2_ACCOUNT_ID: !!process.env.R2_ACCOUNT_ID,
     has_R2_ACCESS_KEY_ID: !!process.env.R2_ACCESS_KEY_ID,
     has_R2_SECRET_ACCESS_KEY: !!process.env.R2_SECRET_ACCESS_KEY,
+    has_R2_BUCKET: !!process.env.R2_BUCKET,
+
     R2_BUCKET_raw: process.env.R2_BUCKET ?? null,
     R2_BUCKET_trim: process.env.R2_BUCKET ? process.env.R2_BUCKET.trim() : null,
-    R2_ACCESS_KEY_ID_preview: safe(process.env.R2_ACCESS_KEY_ID),
-    R2_SECRET_ACCESS_KEY_preview: safe(process.env.R2_SECRET_ACCESS_KEY),
+
+    R2_ACCESS_KEY_ID_preview: preview(process.env.R2_ACCESS_KEY_ID),
+    R2_SECRET_ACCESS_KEY_preview: preview(process.env.R2_SECRET_ACCESS_KEY),
   });
 });
 
-// 2) R2(S3) 실제 호출 테스트: Bucket은 무조건 env에서 가져오게 강제
+/* =========================
+   R2 TEST (Bucket 필수)
+   ========================= */
 app.get("/r2-test", async (req, res) => {
   try {
     const Bucket = (process.env.R2_BUCKET || "").trim();
@@ -64,20 +59,31 @@ app.get("/r2-test", async (req, res) => {
       });
     }
 
-    // ⚠️ 아래 s3 객체는 기존 코드에서 이미 생성돼 있어야 합니다.
-    // (예: const s3 = new AWS.S3({...}) )
-    const out = await s3.listObjectsV2({ Bucket, MaxKeys: 5 }).promise();
+    const result = await s3
+      .listObjectsV2({
+        Bucket,
+        MaxKeys: 5,
+      })
+      .promise();
 
-    return res.json({
+    res.json({
       ok: true,
       bucket: Bucket,
-      count: (out.Contents || []).length,
-      keys: (out.Contents || []).map((x) => x.Key),
+      objectCount: (result.Contents || []).length,
+      keys: (result.Contents || []).map((o) => o.Key),
     });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
   }
 });
+
+/* =========================
+   Server start
+   ========================= */
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("server running on", PORT);
 });

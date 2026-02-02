@@ -14,15 +14,34 @@ const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
 const r2Bucket = process.env.R2_BUCKET;
 
 // endpoint 구성: https://<accountid>.r2.cloudflarestorage.com
-const r2Endpoint =
-  r2AccountId ? `https://${r2AccountId}.r2.cloudflarestorage.com` : null;
+const r2Endpoint = r2AccountId
+  ? `https://${r2AccountId}.r2.cloudflarestorage.com`
+  : null;
 
+/**
+ * ✅ Cloudflare R2에서 "Unauthorized / Signature" 줄이는 핵심 포인트
+ * - s3ForcePathStyle: true  (가장 중요)
+ * - correctClockSkew: true  (서버 시간 오차로 인한 서명 실패 방지)
+ * - httpOptions.timeout 등은 운영 안정성용 (필수는 아님)
+ */
 const s3 = new AWS.S3({
   endpoint: r2Endpoint,
   accessKeyId: r2AccessKeyId,
   secretAccessKey: r2SecretAccessKey,
   region: "auto",
   signatureVersion: "v4",
+
+  // ✅ 중요: R2에서 서명 문제(Unauthorized/SignatureDoesNotMatch) 방지
+  s3ForcePathStyle: true,
+
+  // ✅ 시간 오차로 인한 서명 실패 방지
+  correctClockSkew: true,
+
+  // (선택) 네트워크 안정성
+  httpOptions: {
+    timeout: 30000,
+    connectTimeout: 10000,
+  },
 });
 
 /* ============================
@@ -51,16 +70,16 @@ app.get("/env-check", (req, res) => {
     R2_SECRET_ACCESS_KEY: preview(r2SecretAccessKey),
     R2_BUCKET: preview(r2Bucket),
     R2_ENDPOINT: preview(r2Endpoint),
+    NOTE:
+      "Unauthorized면 대개 서명/권한 문제입니다. 지금은 path-style 강제(s3ForcePathStyle)로 먼저 잡습니다.",
   });
 });
 
 /* ============================
    R2 TEST
-   - 여기서 Bucket 누락이면 100% 코드/ENV 참조 문제
    ============================ */
 app.get("/r2-test", async (req, res) => {
   try {
-    // 1) 버킷 자체가 비었는지 먼저 확인 (지금 현성님이 겪는 에러의 핵심)
     if (!r2Bucket) {
       return res.status(500).json({
         ok: false,
@@ -70,7 +89,6 @@ app.get("/r2-test", async (req, res) => {
       });
     }
 
-    // 2) S3 List로 실제 통신 테스트
     const data = await s3
       .listObjectsV2({
         Bucket: r2Bucket,
@@ -85,24 +103,21 @@ app.get("/r2-test", async (req, res) => {
       keys: (data.Contents || []).map((o) => o.Key),
     });
   } catch (e) {
+    // ✅ Cloudflare/R2 쪽 에러는 code/statusCode가 힌트가 됩니다
     res.status(500).json({
       ok: false,
       error: e.message,
+      code: e.code || null,
+      statusCode: e.statusCode || null,
+      requestId: e.requestId || null,
       note:
-        "여기서 Signature/AccessDenied가 나오면 키/권한/endpoint 문제입니다. Bucket 에러면 코드가 Bucket을 안 넣은 겁니다.",
+        "Unauthorized/SignatureDoesNotMatch면 키/권한/서명(주소스타일) 문제입니다. 이번 수정에서 path-style을 강제했습니다.",
     });
   }
 });
 
 /* ============================
    R2 UPLOAD (POST)
-   - 자동화 공장에 쓰려고 "파일 업로드" 루트도 함께 포함
-   - body 예시:
-     {
-       "key": "audio/test.mp3",
-       "contentType": "audio/mpeg",
-       "base64": "...."   // 파일을 base64로 넣는 방식
-     }
    ============================ */
 app.post("/r2-upload", async (req, res) => {
   try {
@@ -140,7 +155,13 @@ app.post("/r2-upload", async (req, res) => {
 
     res.json({ ok: true, bucket: r2Bucket, key, size: buffer.length });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    res.status(500).json({
+      ok: false,
+      error: e.message,
+      code: e.code || null,
+      statusCode: e.statusCode || null,
+      requestId: e.requestId || null,
+    });
   }
 });
 
@@ -152,4 +173,5 @@ app.listen(PORT, () => {
   console.log(`server listening on ${PORT}`);
   console.log("R2 endpoint:", r2Endpoint);
   console.log("R2 bucket:", r2Bucket);
+  console.log("R2 path-style:", true);
 });
